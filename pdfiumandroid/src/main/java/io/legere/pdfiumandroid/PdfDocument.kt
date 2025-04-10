@@ -139,21 +139,37 @@ class PdfDocument(
      * @throws IllegalArgumentException if  document is closed or the page cannot be loaded,
      * RuntimeException if the page cannot be loaded
      */
+    // In PdfDocument.kt
     fun openPage(pageIndex: Int): PdfPage {
-        check(!isClosed) { "Already closed" }
-        synchronized(PdfiumCore.lock) {
-            if (pageMap.containsKey(pageIndex)) {
-                pageMap[pageIndex]?.let {
-                    it.count++
-//                    Timber.d("from cache openPage: pageIndex: $pageIndex, count: ${it.count}")
-                    return PdfPage(this, pageIndex, it.pagePtr, pageMap)
-                }
-            }
-//            Timber.d("openPage: pageIndex: $pageIndex")
-
-            val pagePtr = nativeLoadPage(this.mNativeDocPtr, pageIndex)
-            pageMap[pageIndex] = PageCount(pagePtr, 1)
-            return PdfPage(this, pageIndex, pagePtr, pageMap)
+        if (pdfDocument == null) {
+             throw RuntimeException("PDF document is null")
+        }
+        return try {
+             val page = nativeLoadPage(pdfDocument, pageIndex)
+             if (page == null) {
+                 // Log an error and throw a more explicit exception
+                 Log.e("PdfDocument", "nativeLoadPage returned null for pageIndex: $pageIndex")
+                 throw RuntimeException("Loaded page is null")
+             }
+             page
+        } catch (e: RuntimeException) {
+             val msg = e.message ?: ""
+             if (msg.contains("Get page pdf document null") || msg.contains("Loaded page is null")) {
+                 Log.e("PdfDocument", "openPage($pageIndex) failed with error: $msg")
+                 // Instead of crashing, call the error callback. You could also choose to return a dummy PdfPage.
+                 // For example, if you want to provide a fallback blank bitmap:
+                 try {
+                     val dummy = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                     // Here, you must instantiate a PdfPage object that wraps the dummy.
+                     // Since PdfPage is created in native code you may need a custom workaround.
+                     // For now, we throw an exception to signal the error.
+                 } catch (dummyEx: Exception) {
+                     // If creating a fallback page fails, rethrow the original exception.
+                 }
+                 throw RuntimeException("openPage($pageIndex) failed: PDF document is invalid or corrupted")
+             } else {
+                 throw e
+             }
         }
     }
 
